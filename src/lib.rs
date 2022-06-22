@@ -71,8 +71,10 @@
 
 use embedded_hal as hal;
 
-use hal::blocking::delay::DelayMs;
+//use hal::blocking::delay::DelayMs;
 use hal::blocking::i2c::{Read, Write, WriteRead};
+use embedded_hal::timer::CountDown;
+use embedded_time::duration::*;
 
 use sensirion_i2c::{crc8, i2c};
 
@@ -143,22 +145,23 @@ impl Command {
 /// rock'n'roll. This driver doesn't require special starting but once can start to
 /// make measurements right away. However, the initial values after start-up will
 /// unstable so you will want to throw away some of them.
-pub struct Sgp40<I2C, D> {
+pub struct Sgp40<'a, I2C, D> {
     i2c: I2C,
     address: u8,
-    delay: D,
+    delay: &'a mut D,
     temperature_offset: i16,
     #[cfg(feature = "voc_index")]
     voc: VocAlgorithm,
 }
 
-impl<I2C, D, E> Sgp40<I2C, D>
+impl<'a, I2C, D, E> Sgp40<'a, I2C, D>
 where
     I2C: Read<Error = E> + Write<Error = E> + WriteRead<Error = E>,
-    D: DelayMs<u32>,
+    D: CountDown,
+    D::Time: From<Milliseconds>,
 {
     /// Creates Sgp40 driver
-    pub fn new(i2c: I2C, address: u8, delay: D) -> Self {
+    pub fn new(i2c: I2C, address: u8, delay: &'a mut D) -> Self {
         Sgp40 {
             i2c,
             address,
@@ -201,7 +204,9 @@ where
         self.i2c
             .write(self.address, &transfer_buffer[0..i])
             .map_err(Error::I2c)?;
-        self.delay.delay_ms(delay);
+        self.delay.start(delay.milliseconds());
+        let _ = nb::block!(self.delay.wait());
+        //self.delay.delay_ms(delay);
 
         Ok(())
     }
@@ -210,7 +215,9 @@ where
     fn write_command(&mut self, cmd: Command) -> Result<(), Error<E>> {
         let (command, delay) = cmd.as_tuple();
         i2c::write_command(&mut self.i2c, self.address, command).map_err(Error::I2c)?;
-        self.delay.delay_ms(delay);
+        self.delay.start(delay.milliseconds());
+        let _ = nb::block!(self.delay.wait());
+        //self.delay.delay_ms(delay);
         Ok(())
     }
 
